@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="tab.svg">
+    <title>Invincible Title Card</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000000; /* Ensure everything starts black */
+        }
+        #start-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #000000;
+            color: #ffe556;
+            z-index: 10;
+            cursor: pointer;
+            font-family: Arial, sans-serif;
+            font-size: 24px;
+            text-align: center;
+        }
+        html {
+            font-size: 16px;
+        }
+        @media (max-width: 768px) {
+            html {
+                font-size: 14px;
+            }
+        }
+        @media (max-width: 480px) {
+            html {
+                font-size: 12px;
+            }
+        }
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            background-color: #000000; /* Start with black background */
+            opacity: 0; /* Start fully transparent */
+            transition: opacity 4s ease; /* 4-second fade-in transition */
+        }
+        .fade-in {
+            opacity: 1;
+        }
+        /* Hide all elements until they're ready */
+        .loading * {
+            visibility: hidden;
+        }
+        .loading {
+            background-color: #000000;
+        }
+    </style>
+</head>
+<body class="loading">
+    <div id="start-screen">
+        <p>Click to Start</p>
+    </div>
+    <canvas id="canvas"></canvas>
+
+    <!-- Audio elements -->
+    <audio id="splatSound" src="splat.mp3" preload="auto"></audio>
+    <audio id="introSound" src="intro.mp3" preload="auto"></audio>
+    
+    <script>
+        // Canvas setup
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const introSound = document.getElementById('introSound');
+        
+        // Preload all assets before showing the start screen
+        function preloadAssets() {
+            let assetsToLoad = 2; // Number of assets to preload (intro sound + splat sound)
+            let assetsLoaded = 0;
+            
+            function assetLoaded() {
+                assetsLoaded++;
+                if (assetsLoaded >= assetsToLoad) {
+                    showStartScreen();
+                }
+            }
+            
+            // Preload intro sound
+            introSound.addEventListener('canplaythrough', assetLoaded, { once: true });
+            introSound.load();
+            
+            // Preload splat sound
+            const splatSound = document.getElementById('splatSound');
+            splatSound.addEventListener('canplaythrough', assetLoaded, { once: true });
+            splatSound.load();
+            
+            // Handle error cases - if loading takes too long, show start screen anyway after 5 seconds
+            setTimeout(() => {
+                if (assetsLoaded < assetsToLoad) {
+                    console.log("Timeout reached, showing start screen anyway");
+                    showStartScreen();
+                }
+            }, 5000);
+        }
+        
+        // Show the start screen once assets are loaded
+        function showStartScreen() {
+            // Remove loading class to show content
+            document.body.classList.remove('loading');
+            
+            // Set up the start screen click event
+            const startScreen = document.getElementById('start-screen');
+            startScreen.addEventListener('click', startExperience);
+            
+            // Make start screen visible
+            startScreen.style.display = 'flex';
+        }
+        
+        // Function to start the experience after user clicks
+        function startExperience() {
+            // Hide the start screen
+            const startScreen = document.getElementById('start-screen');
+            startScreen.style.display = 'none';
+            
+            // Initial resize and setup
+            resizeCanvas();
+            
+            // Set up audio
+            introSound.volume = 0.8;
+            
+            // Play intro sound and start animation simultaneously
+            introSound.play().catch(e => {
+                console.log("Audio play error:", e);
+            });
+            
+            // Start fade-in animation
+            canvas.classList.add('fade-in');
+            
+            // Change background color after fade-in completes
+            setTimeout(() => {
+                document.body.style.backgroundColor = "#00bcf0";
+                canvas.style.backgroundColor = "#00bcf0";
+            }, 4000);
+        }
+        
+        // Start preloading when page loads
+        window.addEventListener('load', preloadAssets);
+        
+        // Store text boundaries for collision detection
+        let textBoundaries = [];
+        let alreadyChangedPixels = {}; // Track which text pixels have already changed
+        
+        // Convert rem to pixels
+        function remToPixels(rem) {
+            return rem * parseFloat(getComputedStyle(document.documentElement).fontSize);
+        }
+        
+        // Set canvas size to window size properly accounting for DPR
+        function resizeCanvas() {
+            const dpr = window.devicePixelRatio || 1;
+            const displayWidth = window.innerWidth;
+            const displayHeight = window.innerHeight;
+            
+            // Set the canvas dimensions scaled for DPR
+            canvas.width = displayWidth * dpr;
+            canvas.height = displayHeight * dpr;
+            
+            // Scale the rendering context
+            ctx.scale(dpr, dpr);
+            
+            // Set CSS dimensions to match display size
+            canvas.style.width = `${displayWidth}px`;
+            canvas.style.height = `${displayHeight}px`;
+            
+            drawInitialState(); // Redraw text when resizing
+        }
+        
+        // Initial resize and add event listener for window resizing
+        window.addEventListener('resize', resizeCanvas);
+        
+
+        // Predefined configurations with rem-based measurements
+        const configurations = [
+            { size: 1.25, splatterAmount: 12, maxTime: 0.150 },
+            { size: 1.875, splatterAmount: 18, maxTime: 0.150 },
+            { size: 2.5, splatterAmount: 24, maxTime: 0.150 },
+            { size: 3.125, splatterAmount: 30, maxTime: 0.150 },
+            { size: 3.75, splatterAmount: 36, maxTime: 0.150 },
+            { size: 4.375, splatterAmount: 42, maxTime: 0.150 },
+            { size: 5, splatterAmount: 48, maxTime: 0.150 }
+        ];
+        let currentIndex = 0;
+        let highestReachedIndex = 0;
+        
+        // Text configuration
+        const mainText = "INVINCIBLE";
+        const subText = "BASED ON THE COMIC BOOK BY";
+        const authorText = "Robert Kirkman, Cory Walker, & Ryan Ottley";
+        const textColor = "#ffe556"; // Yellow
+        const splatterTextColor = "#bf0c11"; // Blood red
+        const splatterBgColor = "#000000"; // Black
+        
+        // Draw initial state with text
+        function drawInitialState() {
+            // Clear canvas first
+            const displayWidth = window.innerWidth;
+            const displayHeight = window.innerHeight;
+            
+            // Clear canvas
+            ctx.fillStyle = "#00bcf0"; // Light blue background
+            ctx.fillRect(0, 0, displayWidth, displayHeight);
+            
+            // Create an offscreen canvas for the final state
+            if (!window.finalCanvas) {
+                window.finalCanvas = document.createElement('canvas');
+            }
+            const finalCanvas = window.finalCanvas;
+            const dpr = window.devicePixelRatio || 1;
+            finalCanvas.width = displayWidth * dpr;
+            finalCanvas.height = displayHeight * dpr;
+            const finalCtx = finalCanvas.getContext('2d');
+            
+            // Reset the final context scale
+            finalCtx.setTransform(1, 0, 0, 1, 0, 0);
+            // Scale the final context for high DPI
+            finalCtx.scale(dpr, dpr);
+            
+            // Draw the final state (black background with red text)
+            finalCtx.fillStyle = "#000000";
+            finalCtx.fillRect(0, 0, displayWidth, displayHeight);
+            
+            // Reset text boundaries
+            textBoundaries = [];
+            alreadyChangedPixels = {};
+            
+            // Set up text styles for the main canvas (visible)
+            ctx.textAlign = "center";
+            ctx.fillStyle = textColor; // Yellow text
+            
+            // Set up text styles for the final canvas
+            finalCtx.textAlign = "center";
+            finalCtx.fillStyle = splatterTextColor; // Red text
+            
+            // Draw main title
+            const titleSize = Math.min(displayWidth / 8, 150);
+            ctx.font = `bold ${titleSize}px Arial`;
+            finalCtx.font = `bold ${titleSize}px Arial`;
+            
+            ctx.fillText(mainText, displayWidth / 2, displayHeight / 2);
+            finalCtx.fillText(mainText, displayWidth / 2, displayHeight / 2);
+            
+            // Get main text boundaries
+            const titleMetrics = ctx.measureText(mainText);
+            textBoundaries.push({
+                text: mainText,
+                x: displayWidth / 2 - titleMetrics.width / 2,
+                y: displayHeight / 2 - titleSize,
+                width: titleMetrics.width,
+                height: titleSize * 1.2,
+                fontSize: titleSize
+            });
+            
+            // Draw subtitle
+            const subSize = Math.min(displayWidth / 40, 24);
+            ctx.font = `${subSize}px Arial`;
+            finalCtx.font = `${subSize}px Arial`;
+            
+            ctx.fillText(subText, displayWidth / 2, displayHeight / 2 + titleSize * 0.7);
+            finalCtx.fillText(subText, displayWidth / 2, displayHeight / 2 + titleSize * 0.7);
+            
+            // Get subtitle boundaries
+            const subMetrics = ctx.measureText(subText);
+            textBoundaries.push({
+                text: subText,
+                x: displayWidth / 2 - subMetrics.width / 2,
+                y: displayHeight / 2 + titleSize * 0.7 - subSize,
+                width: subMetrics.width,
+                height: subSize * 1.2,
+                fontSize: subSize
+            });
+            
+            // Draw author text
+            const authorSize = Math.min(displayWidth / 30, 30);
+            ctx.font = `${authorSize}px Arial`;
+            finalCtx.font = `${authorSize}px Arial`;
+            
+            ctx.fillText(authorText, displayWidth / 2, displayHeight / 2 + titleSize * 0.7 + subSize * 1.5);
+            finalCtx.fillText(authorText, displayWidth / 2, displayHeight / 2 + titleSize * 0.7 + subSize * 1.5);
+            
+            // Get author text boundaries
+            const authorMetrics = ctx.measureText(authorText);
+            textBoundaries.push({
+                text: authorText,
+                x: displayWidth / 2 - authorMetrics.width / 2,
+                y: displayHeight / 2 + titleSize * 0.7 + subSize * 1.5 - authorSize,
+                width: authorMetrics.width,
+                height: authorSize * 1.2,
+                fontSize: authorSize
+            });
+        }
+        
+        // Check if point is inside text boundaries
+        function isPointInText(x, y) {
+            const pointKey = `${Math.floor(x)},${Math.floor(y)}`;
+            
+            // If we've already changed this pixel, return false
+            if (alreadyChangedPixels[pointKey]) {
+                return false;
+            }
+            
+            // Check each text element
+            for (const boundary of textBoundaries) {
+                if (x >= boundary.x && x <= boundary.x + boundary.width &&
+                    y >= boundary.y && y <= boundary.y + boundary.height) {
+                    
+                    // Get pixel data to check if this is actually text (not transparent)
+                    try {
+                        const pixelData = ctx.getImageData(Math.floor(x), Math.floor(y), 1, 1).data;
+                        
+                        // Check if this pixel has the text color (approximately)
+                        const isTextPixel = 
+                            Math.abs(pixelData[0] - parseInt(textColor.substring(1, 3), 16)) < 50 &&
+                            Math.abs(pixelData[1] - parseInt(textColor.substring(3, 5), 16)) < 50 &&
+                            Math.abs(pixelData[2] - parseInt(textColor.substring(5, 7), 16)) < 50;
+                        
+                        if (isTextPixel) {
+                            // Mark this pixel as changed
+                            alreadyChangedPixels[pointKey] = true;
+                            return true;
+                        }
+                    } catch (e) {
+                        // Handle any error getting pixel data
+                        console.error("Error checking pixel:", e);
+                    }
+                }
+            }
+            
+            return false;
+        }
+        
+        // Function to create a splatter effect
+        function createSplatter(x, y, size, amount) {
+            // Play the splat sound effect
+            const splatSound = document.getElementById('splatSound');
+            // Reset the sound to the beginning if it's already playing
+            splatSound.currentTime = 0;
+            // Play the sound with a random volume variation for more natural effect
+            splatSound.volume = 0.7 + Math.random() * 0.3;
+            splatSound.play().catch(e => console.log("Audio play error:", e));
+            
+            // Convert rem to pixels for size
+            const pixelSize = remToPixels(size);
+            
+            // Function to create simple circular reveal
+            function createRevealCircle(x, y, size) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(x, y, size, 0, Math.PI * 2);
+                ctx.clip();
+                
+                // Draw the "final state" content from the offscreen canvas
+                // Using the display coordinates (not the device pixel coordinates)
+                ctx.drawImage(
+                    window.finalCanvas, 
+                    0, 0, window.finalCanvas.width, window.finalCanvas.height,
+                    0, 0, window.innerWidth, window.innerHeight
+                );
+                
+                ctx.restore();
+            }
+            
+            // Create main splatter
+            createRevealCircle(x, y, pixelSize * 0.8);
+            
+            // Create additional smaller circles
+            for (let i = 0; i < amount; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const distance = Math.random() * pixelSize * 2;
+                const dropX = x + Math.cos(angle) * distance;
+                const dropY = y + Math.sin(angle) * distance;
+                const dropSize = Math.max(1, pixelSize * (1 - distance / (pixelSize * 2)) * Math.random());
+                
+                createRevealCircle(dropX, dropY, dropSize);
+            }
+        }
+        
+        // Variables for drawing
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+        let drawStartTime = 0;
+        let drawTimer = null;
+        
+        // Mouse event handler helper function
+        function getCanvasCoordinates(e) {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top
+            };
+        }
+        
+        // Event listeners for mouse interaction
+        canvas.addEventListener('mousedown', (e) => {
+            isDrawing = true;
+            const coords = getCanvasCoordinates(e);
+            lastX = coords.x;
+            lastY = coords.y;
+            drawStartTime = Date.now();
+            
+            // Get current configuration
+            const currentConfig = configurations[currentIndex];
+            
+            // Create a splatter at the initial click point
+            createSplatter(
+                lastX, 
+                lastY, 
+                currentConfig.size, 
+                currentConfig.splatterAmount
+            );
+            
+            // Set timer to stop drawing after 0.5 seconds
+            drawTimer = setTimeout(() => {
+                if (isDrawing) {
+                    isDrawing = false;
+                    
+                    // Update highest reached index
+                    highestReachedIndex = Math.max(highestReachedIndex, currentIndex);
+                    
+                    // Increment index, but don't go beyond the highest reached
+                    currentIndex = highestReachedIndex < configurations.length - 1 
+                        ? currentIndex + 1 
+                        : highestReachedIndex;
+                }
+            }, 500);
+        });
+        
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDrawing) return;
+            
+            // Get current configuration
+            const currentConfig = configurations[currentIndex];
+            
+            // Calculate time elapsed
+            const currentTime = Date.now();
+            const elapsedTime = (currentTime - drawStartTime) / 1000;
+            
+            // Stop if time exceeded
+            if (elapsedTime > currentConfig.maxTime) {
+                isDrawing = false;
+                
+                // Update highest reached index
+                highestReachedIndex = Math.max(highestReachedIndex, currentIndex);
+                
+                // Increment index, but don't go beyond the highest reached
+                currentIndex = highestReachedIndex < configurations.length - 1 
+                    ? currentIndex + 1 
+                    : highestReachedIndex;
+                    
+                return;
+            }
+            
+            // Calculate distance moved
+            const coords = getCanvasCoordinates(e);
+            const currentX = coords.x;
+            const currentY = coords.y;
+            
+            // Create splatters along the path 
+            if (Math.abs(currentX - lastX) > 0.5 || Math.abs(currentY - lastY) > 0.5) {
+                createSplatter(
+                    currentX, 
+                    currentY, 
+                    currentConfig.size, 
+                    currentConfig.splatterAmount
+                );
+                
+                lastX = currentX;
+                lastY = currentY;
+            }
+        });
+        
+        // Stop drawing when mouse is released or leaves canvas
+        canvas.addEventListener('mouseup', () => {
+            if (isDrawing) {
+                // Clear any existing timer
+                if (drawTimer) {
+                    clearTimeout(drawTimer);
+                }
+                
+                // Update highest reached index
+                highestReachedIndex = Math.max(highestReachedIndex, currentIndex);
+                
+                // Increment index, but don't go beyond the highest reached
+                currentIndex = highestReachedIndex < configurations.length - 1 
+                    ? currentIndex + 1 
+                    : highestReachedIndex;
+            }
+            isDrawing = false;
+        });
+        
+        canvas.addEventListener('mouseleave', () => {
+            if (isDrawing) {
+                // Clear any existing timer
+                if (drawTimer) {
+                    clearTimeout(drawTimer);
+                }
+                
+                // Update highest reached index
+                highestReachedIndex = Math.max(highestReachedIndex, currentIndex);
+                
+                // Increment index, but don't go beyond the highest reached
+                currentIndex = highestReachedIndex < configurations.length - 1 
+                    ? currentIndex + 1 
+                    : highestReachedIndex;
+            }
+            isDrawing = false;
+        });
+        
+        // Touch support for mobile devices
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            isDrawing = true;
+            lastX = touch.clientX - rect.left;
+            lastY = touch.clientY - rect.top;
+            drawStartTime = Date.now();
+            
+            // Get current configuration
+            const currentConfig = configurations[currentIndex];
+            
+            // Create a splatter at the initial touch point
+            createSplatter(
+                lastX, 
+                lastY, 
+                currentConfig.size, 
+                currentConfig.splatterAmount
+            );
+            
+            // Set timer to stop drawing after 0.5 seconds
+            drawTimer = setTimeout(() => {
+                if (isDrawing) {
+                    isDrawing = false;
+                    
+                    // Update highest reached index
+                    highestReachedIndex = Math.max(highestReachedIndex, currentIndex);
+                    
+                    // Increment index, but don't go beyond the highest reached
+                    currentIndex = highestReachedIndex < configurations.length - 1 
+                        ? currentIndex + 1 
+                        : highestReachedIndex;
+                }
+            }, 500);
+        });
+        
+        canvas.addEventListener('touchmove', (e) => {
+            if (!isDrawing) return;
+            e.preventDefault();
+            
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            
+            // Get current configuration
+            const currentConfig = configurations[currentIndex];
+            
+            // Calculate time elapsed
+            const currentTime = Date.now();
+            const elapsedTime = (currentTime - drawStartTime) / 1000;
+            
+            // Stop if time exceeded
+            if (elapsedTime > currentConfig.maxTime) {
+                isDrawing = false;
+                
+                // Update highest reached index
+                highestReachedIndex = Math.max(highestReachedIndex, currentIndex);
+                
+                // Increment index, but don't go beyond the highest reached
+                currentIndex = highestReachedIndex < configurations.length - 1 
+                    ? currentIndex + 1 
+                    : highestReachedIndex;
+                return;
+            }
+            
+            // Calculate distance moved
+            const currentX = touch.clientX - rect.left;
+            const currentY = touch.clientY - rect.top;
+            
+            // Create splatters along the path 
+            if (Math.abs(currentX - lastX) > 1 || Math.abs(currentY - lastY) > 1) {
+                createSplatter(
+                    currentX, 
+                    currentY, 
+                    currentConfig.size, 
+                    currentConfig.splatterAmount
+                );
+                
+                lastX = currentX;
+                lastY = currentY;
+            }
+        });
+        
+        canvas.addEventListener('touchend', () => {
+            if (isDrawing) {
+                // Clear any existing timer
+                if (drawTimer) {
+                    clearTimeout(drawTimer);
+                }
+                
+                // Update highest reached index
+                highestReachedIndex = Math.max(highestReachedIndex, currentIndex);
+                
+                // Increment index, but don't go beyond the highest reached
+                currentIndex = highestReachedIndex < configurations.length - 1 
+                    ? currentIndex + 1 
+                    : highestReachedIndex;
+            }
+            isDrawing = false;
+        });
+    </script>
+</body>
+</html>
